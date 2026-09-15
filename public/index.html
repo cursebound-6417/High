@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>High School — The Game</title>
+<style>
+body{font-family:system-ui;margin:0;background:#111;color:#eee} .wrap{max-width:900px;margin:auto;padding:24px}
+.card{background:#1c1c1c;border:1px solid #333;border-radius:18px;padding:20px;margin:14px 0}
+button,input,textarea{font:inherit;border-radius:10px;border:1px solid #444;padding:12px;background:#101010;color:#fff}
+button{cursor:pointer;background:#eee;color:#111;border:0;font-weight:700}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.small{color:#aaa}.pill{display:inline-block;padding:5px 9px;border-radius:99px;background:#333;margin:3px}.ok{background:#174d2c}.wait{background:#4a3b13}
+.hidden{display:none}.qr{background:#fff;padding:12px;border-radius:12px;display:inline-block}.answer{white-space:pre-wrap;background:#101010;border-radius:10px;padding:10px;margin-top:6px}
+h1{margin-bottom:4px} label{display:block;margin:8px 0}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+</style></head>
+<body><div class="wrap">
+<h1>HIGH SCHOOL — THE GAME</h1><div class="small">A private room for up to 100 players. No right or wrong answers.</div>
+
+<div id="home" class="card">
+<h2>Start</h2><div class="row"><button onclick="host()">Create host room</button><button onclick="show('join')">Join a room</button></div>
+</div>
+
+<div id="join" class="card hidden">
+<h2>Join</h2><input id="code" placeholder="Room code"><input id="name" placeholder="Your name">
+<button onclick="join()">Join game</button><p id="joinmsg" class="small"></p>
+</div>
+
+<div id="host" class="hidden">
+<div class="card"><h2>Host room: <span id="roomCode"></span></h2>
+<div class="row"><div id="qr" class="qr"></div><div><b>Scan to join</b><p class="small" id="joinUrl"></p></div></div></div>
+<div class="card"><h2>Participants (<span id="count">0</span>/100)</h2><div id="players" class="grid"></div></div>
+<div class="card"><h2>Question <span id="hq">1</span></h2><p id="hqtext"></p><p id="autoStatus" class="small">Players submit their answers. The next question will appear automatically when everyone has answered.</p></div>
+</div>
+
+<div id="player" class="hidden">
+<div class="card"><h2>You're in 🎮</h2><p class="small">Room <span id="pcode"></span></p><p id="pquestion"></p>
+<textarea id="answer" rows="7" style="width:100%;box-sizing:border-box" placeholder="Write whatever you genuinely think…"></textarea>
+<br><button id="submitBtn" onclick="submitAnswer()">Submit answer</button> <button id="nextBtn" class="hidden" onclick="nextQuestion()">Next question →</button><p id="saved" class="small"></p></div>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+let ws,mode,roomCode,playerId,current=1,questions=[];
+function show(id){["home","join"].forEach(x=>document.getElementById(x).classList.add("hidden"));document.getElementById(id).classList.remove("hidden")}
+function connect(){ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws.onmessage=e=>handle(JSON.parse(e.data))}
+function host(){mode="host";connect();ws.onopen=()=>ws.send(JSON.stringify({type:"host_create"}))}
+function join(){mode="player";roomCode=document.getElementById("code").value.trim().toUpperCase();let n=document.getElementById("name").value.trim();if(!roomCode||!n)return;connect();ws.onopen=()=>ws.send(JSON.stringify({type:"player_join",code:roomCode,name:n}))}
+function handle(m){if(m.type==="error"){alert(m.message);return}if(m.type==="host_ready"){roomCode=m.code;questions=m.questions;document.getElementById("home").classList.add("hidden");document.getElementById("host").classList.remove("hidden");document.getElementById("roomCode").textContent=roomCode;let u=location.origin+"/?room="+roomCode;document.getElementById("joinUrl").textContent=u;new QRCode(document.getElementById("qr"),{text:u,width:180,height:180});renderHost(m)}if(m.type==="player_ready"){playerId=m.id;questions=m.questions||questions;current=1;document.getElementById("join").classList.add("hidden");document.getElementById("player").classList.remove("hidden");document.getElementById("pcode").textContent=m.code;renderPlayer(m)}if(m.type==="state"){questions=m.questions;if(mode==="host")renderHost(m);else{let me=m.players.find(x=>x.id===playerId);if(me)current=me.current||current;renderPlayer(m)}}}
+function renderHost(s){document.getElementById("count").textContent=s.players.length;let p=document.getElementById("players");p.innerHTML="";s.players.forEach(x=>{let d=document.createElement("div");d.className="card";let answers=Object.entries(x.answers||{}).sort((a,b)=>Number(a[0])-Number(b[0]));d.innerHTML="<b>"+esc(x.name)+"</b> "+(x.connected?"🟢":"⚪")+"<div class='small'>Answered "+answers.length+" / "+s.questions.length+" questions</div>";answers.forEach(([q,a])=>{let box=document.createElement("div");box.className="answer";box.innerHTML="<b>Q"+q+":</b> "+esc(a);d.appendChild(box)});p.appendChild(d)});document.getElementById("hq").textContent="—";document.getElementById("hqtext").textContent="Each player advances independently."}
+function renderPlayer(s){
+  let q=questions[current-1]; if(!q)return;
+  document.getElementById("pquestion").textContent="Q"+current+" — "+q.text;
+  let mine=s.players?s.players.find(x=>x.id===playerId):null;
+  let answered=mine&&mine.answers&&mine.answers[current]!==undefined;
+  let a=document.getElementById("answer"),sub=document.getElementById("submitBtn"),next=document.getElementById("nextBtn");
+  a.placeholder="Write whatever you genuinely think…"; a.rows=7;
+  if(answered){
+    a.value=mine.answers[current]; a.disabled=true; sub.classList.add("hidden");
+    next.classList.toggle("hidden",current>=questions.length);
+    document.getElementById("saved").textContent=current>=questions.length?"✓ Feedback submitted. Thanks for playing!":"✓ Answer saved. Move to the next question when ready.";
+  }else{
+    a.disabled=false; sub.classList.remove("hidden"); next.classList.add("hidden");
+    document.getElementById("saved").textContent="";
+  }
+}
+
+
+function submitAnswer(){let value=document.getElementById("answer").value.trim();if(!value){document.getElementById("saved").textContent="Please enter an answer first.";return}ws.send(JSON.stringify({type:"submit",question:current,answer:value}))}
+function nextQuestion(){if(current>=questions.length)return;current++;ws.send(JSON.stringify({type:"set_player_question",question:current}))}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+let params=new URLSearchParams(location.search);if(params.get("room")){show("join");document.getElementById("code").value=params.get("room").toUpperCase()}
+</script></body></html>
